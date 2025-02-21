@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 Watch Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 20px;
+            padding: 0;
+        }
+        button {
+            background-color: #007AFF;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            margin: 10px 0;
+            width: 100%;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #f0f0f0;
+        }
+        .toggle-container {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>ESP32 Watch Controller</h1>
+    <div class="status" id="status">Not connected</div>
+    <button onclick="connectToDevice()">Connect to Watch</button>
+    <button onclick="syncTime()" id="syncBtn" disabled>Sync Time Now</button>
+    
+    <div class="toggle-container">
+        <label>
+            <input type="checkbox" id="autoSync" onchange="toggleAutoSync()">
+            Auto Sync (every minute)
+        </label>
+    </div>
+
+    <script>
+        let characteristic = null;
+        let autoSyncInterval = null;
+
+        async function connectToDevice() {
+    try {
+        document.getElementById('status').textContent = 'Starting scan...';
+        
+        // First check if Bluetooth is available
+        if (!navigator.bluetooth) {
+            throw new Error('Bluetooth not available in this browser. Please use Safari.');
+        }
+
+        // More specific filter for our device
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [
+                { name: 'ESP32Watch' },
+                { services: ['1805'] }  // Time service UUID
+            ]
+        });
+        
+        document.getElementById('status').textContent = 'Device selected, connecting...';
+        console.log('Found device:', device.name);
+        
+        const server = await device.gatt.connect();
+        document.getElementById('status').textContent = 'Connected to GATT server...';
+        
+        const service = await server.getPrimaryService('1805');
+        document.getElementById('status').textContent = 'Found time service...';
+        
+        characteristic = await service.getCharacteristic('2a2b');
+        document.getElementById('status').textContent = 'Connected successfully!';
+        document.getElementById('syncBtn').disabled = false;
+        
+    } catch (error) {
+        console.error('Connection error:', error);
+        document.getElementById('status').textContent = 'Error: ' + error.message;
+    }
+        }
+        
+        async function syncTime() {
+            if (!characteristic) return;
+            
+            try {
+                const now = new Date();
+                const timeString = now.getHours().toString().padStart(2, '0') + 
+                                 ':' + 
+                                 now.getMinutes().toString().padStart(2, '0');
+                
+                const encoder = new TextEncoder();
+                await characteristic.writeValue(encoder.encode(timeString));
+                
+                document.getElementById('status').textContent = 'Time synced: ' + timeString;
+            } catch (error) {
+                console.error(error);
+                document.getElementById('status').textContent = 'Sync error: ' + error;
+                if (autoSyncInterval) {
+                    toggleAutoSync();
+                    document.getElementById('autoSync').checked = false;
+                }
+            }
+        }
+
+        function toggleAutoSync() {
+            if (document.getElementById('autoSync').checked) {
+                syncTime();
+                autoSyncInterval = setInterval(() => {
+                    const now = new Date();
+                    if (now.getSeconds() === 0) { // Only sync at the start of each minute
+                        syncTime();
+                    }
+                }, 1000);
+            } else {
+                if (autoSyncInterval) {
+                    clearInterval(autoSyncInterval);
+                    autoSyncInterval = null;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
